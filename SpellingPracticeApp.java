@@ -1,6 +1,5 @@
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
-import javax.swing.table.TableRowSorter;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.io.*;
@@ -13,16 +12,23 @@ public class SpellingPracticeApp extends JFrame {
     private static final String WORDS_FILE = "spelling_words.csv";
     private static final String MISTAKES_FILE = "spelling_mistakes.txt";
     private static final String PROGRESS_FILE = "spelling_progress.txt";
+    private static final String SESSION_HISTORY_FILE = "session_history.txt";
+    private static final int WORDS_PER_SESSION = 30;
+    private static final int SESSIONS_TO_AVOID = 2;
     
     private List<String> allWords = new ArrayList<>();
-    private List<String> practiceWords = new ArrayList<>();
+    private List<String> sessionWords = new ArrayList<>();
     private Map<String, Integer> mistakeCount = new HashMap<>();
     private Map<String, List<String>> mistakeDetails = new HashMap<>();
+    private List<List<String>> recentSessions = new ArrayList<>();
+    private List<String> currentSessionMistakes = new ArrayList<>();
     private String currentWord;
+    private int currentWordIndex = 0;
     private Random random = new Random();
     
     // UI Components
     private JLabel wordLabel;
+    private JLabel progressLabel;
     private JButton correctButton;
     private JButton wrongButton;
     private JButton showStatsButton;
@@ -36,29 +42,38 @@ public class SpellingPracticeApp extends JFrame {
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLayout(new BorderLayout());
         
-        initializeData();
-        createUI();
-        loadNextWord();
+        if (!initializeData()) {
+            JOptionPane.showMessageDialog(this, 
+                "Please create a spelling_words.csv file with one word per line", 
+                "No Words File", 
+                JOptionPane.ERROR_MESSAGE);
+            System.exit(1);
+        }
         
-        setSize(400, 300);
+        createUI();
+        startNewSession();
+        
+        setSize(450, 350);
         setLocationRelativeTo(null);
         setVisible(true);
     }
     
-    private void initializeData() {
-        loadWords();
+    private boolean initializeData() {
+        if (!loadWords()) {
+            return false;
+        }
         loadProgress();
-        preparePracticeList();
+        loadSessionHistory();
+        return true;
     }
     
-    private void loadWords() {
+    private boolean loadWords() {
+        File file = new File(WORDS_FILE);
+        if (!file.exists()) {
+            return false;
+        }
+        
         try {
-            File file = new File(WORDS_FILE);
-            if (!file.exists()) {
-                // Create sample CSV if it doesn't exist
-                createSampleCSV();
-            }
-            
             List<String> lines = Files.readAllLines(Paths.get(WORDS_FILE));
             for (String line : lines) {
                 String word = line.trim();
@@ -66,28 +81,18 @@ public class SpellingPracticeApp extends JFrame {
                     allWords.add(word);
                 }
             }
+            
+            if (allWords.isEmpty()) {
+                return false;
+            }
         } catch (IOException e) {
             JOptionPane.showMessageDialog(this, 
                 "Error loading words file: " + e.getMessage(), 
                 "Error", 
                 JOptionPane.ERROR_MESSAGE);
+            return false;
         }
-    }
-    
-    private void createSampleCSV() {
-        String[] sampleWords = {
-            "cat", "dog", "house", "tree", "book", 
-            "water", "friend", "school", "happy", "color",
-            "family", "beautiful", "because", "through", "enough"
-        };
-        
-        try {
-            Files.write(Paths.get(WORDS_FILE), 
-                Arrays.asList(sampleWords), 
-                StandardOpenOption.CREATE);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+        return true;
     }
     
     private void loadProgress() {
@@ -111,6 +116,54 @@ public class SpellingPracticeApp extends JFrame {
         }
     }
     
+    private void loadSessionHistory() {
+        File historyFile = new File(SESSION_HISTORY_FILE);
+        if (!historyFile.exists()) {
+            return;
+        }
+        
+        try {
+            List<String> lines = Files.readAllLines(Paths.get(SESSION_HISTORY_FILE));
+            for (String line : lines) {
+                if (!line.trim().isEmpty()) {
+                    List<String> sessionWords = Arrays.asList(line.split(","));
+                    recentSessions.add(sessionWords);
+                }
+            }
+            
+            // Keep only the most recent sessions
+            while (recentSessions.size() > SESSIONS_TO_AVOID) {
+                recentSessions.remove(0);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+    
+    private void saveSessionHistory() {
+        try {
+            // Add current session to history
+            recentSessions.add(new ArrayList<>(sessionWords));
+            
+            // Keep only the most recent sessions
+            while (recentSessions.size() > SESSIONS_TO_AVOID) {
+                recentSessions.remove(0);
+            }
+            
+            // Save to file
+            List<String> lines = new ArrayList<>();
+            for (List<String> session : recentSessions) {
+                lines.add(String.join(",", session));
+            }
+            
+            Files.write(Paths.get(SESSION_HISTORY_FILE), lines, 
+                StandardOpenOption.CREATE, 
+                StandardOpenOption.TRUNCATE_EXISTING);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+    
     private void saveProgress() {
         try {
             List<String> lines = new ArrayList<>();
@@ -125,27 +178,81 @@ public class SpellingPracticeApp extends JFrame {
         }
     }
     
-    private void preparePracticeList() {
-        // First add words that were spelled wrong before (prioritized by mistake count)
-        List<String> mistakeWords = mistakeCount.entrySet().stream()
-            .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
-            .map(Map.Entry::getKey)
-            .filter(allWords::contains)
-            .collect(Collectors.toList());
+    private void startNewSession() {
+        sessionWords.clear();
+        currentSessionMistakes.clear();
+        currentWordIndex = 0;
+        sessionCorrect = 0;
+        sessionWrong = 0;
         
-        practiceWords.addAll(mistakeWords);
+        // Get words used in recent sessions
+        Set<String> recentlyUsedWords = new HashSet<>();
+        for (List<String> session : recentSessions) {
+            recentlyUsedWords.addAll(session);
+        }
         
-        // Then add words that haven't been practiced or were correct
+        // Create pool of available words (avoiding recently used ones)
+        List<String> availableWords = new ArrayList<>();
         for (String word : allWords) {
-            if (!practiceWords.contains(word)) {
-                practiceWords.add(word);
+            if (!recentlyUsedWords.contains(word)) {
+                availableWords.add(word);
             }
         }
         
-        // If no words available, use all words
-        if (practiceWords.isEmpty()) {
-            practiceWords.addAll(allWords);
+        // If not enough words available, add some recently used ones back
+        if (availableWords.size() < WORDS_PER_SESSION) {
+            for (String word : allWords) {
+                if (!availableWords.contains(word)) {
+                    availableWords.add(word);
+                    if (availableWords.size() >= WORDS_PER_SESSION) {
+                        break;
+                    }
+                }
+            }
         }
+        
+        // Select 30 words with weighted selection based on mistake count
+        sessionWords = selectWeightedWords(availableWords, WORDS_PER_SESSION);
+        Collections.shuffle(sessionWords);
+        
+        loadNextWord();
+    }
+    
+    private List<String> selectWeightedWords(List<String> pool, int count) {
+        List<String> selected = new ArrayList<>();
+        List<String> weightedPool = new ArrayList<>();
+        
+        // Create weighted pool
+        for (String word : pool) {
+            int weight = mistakeCount.getOrDefault(word, 0) + 1;
+            for (int i = 0; i < weight * 2; i++) { // Double weight for mistakes
+                weightedPool.add(word);
+            }
+        }
+        
+        // Select words
+        Set<String> usedWords = new HashSet<>();
+        while (selected.size() < count && !weightedPool.isEmpty()) {
+            String word = weightedPool.get(random.nextInt(weightedPool.size()));
+            if (!usedWords.contains(word)) {
+                selected.add(word);
+                usedWords.add(word);
+            }
+            
+            // Remove all instances of selected word from pool
+            weightedPool.removeAll(Collections.singleton(word));
+        }
+        
+        // If we need more words, add random ones from the pool
+        while (selected.size() < count && selected.size() < pool.size()) {
+            String word = pool.get(random.nextInt(pool.size()));
+            if (!usedWords.contains(word)) {
+                selected.add(word);
+                usedWords.add(word);
+            }
+        }
+        
+        return selected;
     }
     
     private void createUI() {
@@ -155,14 +262,20 @@ public class SpellingPracticeApp extends JFrame {
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(10, 10, 10, 10);
         
+        // Progress label
+        progressLabel = new JLabel("Word 1 of " + WORDS_PER_SESSION);
+        progressLabel.setFont(new Font("Arial", Font.BOLD, 14));
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        gbc.gridwidth = 2;
+        mainPanel.add(progressLabel, gbc);
+        
         // Word display
         wordLabel = new JLabel("", SwingConstants.CENTER);
         wordLabel.setFont(new Font("Arial", Font.BOLD, 36));
         wordLabel.setPreferredSize(new Dimension(300, 60));
         wordLabel.setBorder(BorderFactory.createLineBorder(Color.GRAY, 2));
-        gbc.gridx = 0;
-        gbc.gridy = 0;
-        gbc.gridwidth = 2;
+        gbc.gridy = 1;
         mainPanel.add(wordLabel, gbc);
         
         // Buttons panel
@@ -170,29 +283,33 @@ public class SpellingPracticeApp extends JFrame {
         
         correctButton = new JButton("✓ Correct");
         correctButton.setFont(new Font("Arial", Font.PLAIN, 18));
-        correctButton.setBackground(new Color(144, 238, 144));
+        correctButton.setBackground(Color.GREEN);
+        correctButton.setOpaque(true);
+        correctButton.setBorderPainted(false);
         correctButton.addActionListener(this::handleCorrect);
         buttonPanel.add(correctButton);
         
         wrongButton = new JButton("✗ Wrong");
         wrongButton.setFont(new Font("Arial", Font.PLAIN, 18));
-        wrongButton.setBackground(new Color(255, 182, 193));
+        wrongButton.setBackground(Color.RED);
+        wrongButton.setOpaque(true);
+        wrongButton.setBorderPainted(false);
         wrongButton.addActionListener(this::handleWrong);
         buttonPanel.add(wrongButton);
         
-        gbc.gridy = 1;
+        gbc.gridy = 2;
         mainPanel.add(buttonPanel, gbc);
         
         // Session statistics
         sessionStatsLabel = new JLabel("Session: Correct: 0 | Wrong: 0");
         sessionStatsLabel.setFont(new Font("Arial", Font.PLAIN, 12));
-        gbc.gridy = 2;
+        gbc.gridy = 3;
         mainPanel.add(sessionStatsLabel, gbc);
         
         // Statistics label
         statsLabel = new JLabel("");
         statsLabel.setFont(new Font("Arial", Font.ITALIC, 12));
-        gbc.gridy = 3;
+        gbc.gridy = 4;
         mainPanel.add(statsLabel, gbc);
         
         add(mainPanel, BorderLayout.CENTER);
@@ -200,7 +317,7 @@ public class SpellingPracticeApp extends JFrame {
         // Bottom panel with additional buttons
         JPanel bottomPanel = new JPanel(new FlowLayout());
         
-        showStatsButton = new JButton("Show Statistics");
+        showStatsButton = new JButton("Show All Statistics");
         showStatsButton.addActionListener(e -> showStatistics());
         bottomPanel.add(showStatsButton);
         
@@ -208,17 +325,15 @@ public class SpellingPracticeApp extends JFrame {
     }
     
     private void loadNextWord() {
-        if (practiceWords.isEmpty()) {
-            JOptionPane.showMessageDialog(this, 
-                "No words available to practice!", 
-                "No Words", 
-                JOptionPane.INFORMATION_MESSAGE);
+        if (currentWordIndex >= sessionWords.size()) {
+            // Session complete
+            sessionComplete();
             return;
         }
         
-        // Weighted selection - words with more mistakes are more likely to be selected
-        currentWord = selectWeightedWord();
+        currentWord = sessionWords.get(currentWordIndex);
         wordLabel.setText(currentWord);
+        progressLabel.setText("Word " + (currentWordIndex + 1) + " of " + WORDS_PER_SESSION);
         
         // Update stats label
         Integer mistakes = mistakeCount.get(currentWord);
@@ -229,22 +344,9 @@ public class SpellingPracticeApp extends JFrame {
         }
     }
     
-    private String selectWeightedWord() {
-        // Create weighted list based on mistake count
-        List<String> weightedList = new ArrayList<>();
-        
-        for (String word : practiceWords) {
-            int weight = mistakeCount.getOrDefault(word, 0) + 1;
-            for (int i = 0; i < weight; i++) {
-                weightedList.add(word);
-            }
-        }
-        
-        return weightedList.get(random.nextInt(weightedList.size()));
-    }
-    
     private void handleCorrect(ActionEvent e) {
         sessionCorrect++;
+        currentWordIndex++;
         updateSessionStats();
         loadNextWord();
     }
@@ -273,7 +375,9 @@ public class SpellingPracticeApp extends JFrame {
             if (!mistake.isEmpty()) {
                 recordMistake(currentWord, mistake);
             }
+            currentSessionMistakes.add(currentWord);
             sessionWrong++;
+            currentWordIndex++;
             updateSessionStats();
             dialog.dispose();
             loadNextWord();
@@ -310,9 +414,69 @@ public class SpellingPracticeApp extends JFrame {
         
         // Save progress
         saveProgress();
+    }
+    
+    private void sessionComplete() {
+        // Save session history
+        saveSessionHistory();
         
-        // Re-prepare practice list to update weights
-        preparePracticeList();
+        // Show summary dialog
+        JDialog dialog = new JDialog(this, "Session Complete!", true);
+        dialog.setLayout(new BorderLayout());
+        dialog.setSize(400, 300);
+        dialog.setLocationRelativeTo(this);
+        
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        
+        // Summary text
+        JTextArea summaryArea = new JTextArea();
+        summaryArea.setEditable(false);
+        summaryArea.setFont(new Font("Arial", Font.PLAIN, 14));
+        
+        StringBuilder summary = new StringBuilder();
+        summary.append("Session Complete!\n\n");
+        summary.append("Total Words: ").append(WORDS_PER_SESSION).append("\n");
+        summary.append("Correct: ").append(sessionCorrect).append("\n");
+        summary.append("Wrong: ").append(sessionWrong).append("\n");
+        summary.append("Accuracy: ").append(String.format("%.1f%%", 
+            (sessionCorrect * 100.0 / WORDS_PER_SESSION))).append("\n\n");
+        
+        if (!currentSessionMistakes.isEmpty()) {
+            summary.append("Words to practice:\n");
+            for (String word : currentSessionMistakes) {
+                summary.append("  • ").append(word).append("\n");
+            }
+        } else {
+            summary.append("Perfect score! All words spelled correctly!");
+        }
+        
+        summaryArea.setText(summary.toString());
+        JScrollPane scrollPane = new JScrollPane(summaryArea);
+        panel.add(scrollPane, BorderLayout.CENTER);
+        
+        // Buttons
+        JPanel buttonPanel = new JPanel(new FlowLayout());
+        
+        JButton newSessionButton = new JButton("New Session");
+        newSessionButton.addActionListener(ev -> {
+            dialog.dispose();
+            startNewSession();
+        });
+        buttonPanel.add(newSessionButton);
+        
+        JButton exitButton = new JButton("Exit");
+        exitButton.addActionListener(ev -> System.exit(0));
+        buttonPanel.add(exitButton);
+        
+        panel.add(buttonPanel, BorderLayout.SOUTH);
+        dialog.add(panel);
+        
+        // Disable main window buttons
+        correctButton.setEnabled(false);
+        wrongButton.setEnabled(false);
+        
+        dialog.setVisible(true);
     }
     
     private void showStatistics() {
