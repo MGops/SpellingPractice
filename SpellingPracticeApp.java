@@ -18,6 +18,7 @@ public class SpellingPracticeApp extends JFrame {
     private List<String> allWords = new ArrayList<>();
     private List<String> sessionWords = new ArrayList<>();
     private Map<String, Integer> mistakeCount = new HashMap<>();
+    private Map<String, List<String>> mistakeDetails = new HashMap<>();
     private List<List<String>> recentSessions = new ArrayList<>();
     private List<String> currentSessionMistakes = new ArrayList<>();
     private String currentWord;
@@ -42,8 +43,8 @@ public class SpellingPracticeApp extends JFrame {
         
         if (!initializeData()) {
             JOptionPane.showMessageDialog(this, 
-                "Please create a spelling_words.csv file with one word per line", 
-                "No Words File", 
+                "Error initializing application data", 
+                "Error", 
                 JOptionPane.ERROR_MESSAGE);
             System.exit(1);
         }
@@ -51,7 +52,7 @@ public class SpellingPracticeApp extends JFrame {
         createUI();
         startNewSession();
         
-        setSize(450, 350);
+        setSize(900, 650);
         setLocationRelativeTo(null);
         setVisible(true);
     }
@@ -66,7 +67,7 @@ public class SpellingPracticeApp extends JFrame {
     }
     
     private boolean loadWords() {
-    // Embedded words from spelling_words.csv - no external file needed
+        // Embedded words - no external file needed
         String[] wordsArray = {
             "about", "above", "after", "again", "all", "another", "any", "anyone",
             "away", "are", "back", "baby", "ball", "be", "because", "been",
@@ -119,16 +120,12 @@ public class SpellingPracticeApp extends JFrame {
             "drain", "paint", "sprain", "chain", "train", "stain", "fire", "hire",
             "wire", "spire", "bonfire", "inspire", "conspire", "hear", "ear", "dear",
             "fear", "gear", "near", "rear", "tear", "year", "spear", "sure",
-            "pure", "cure", "picture", "mixture", "creature", "future", "adventure", "temperature"
+            "pure", "cure", "picture"
         };
         
         allWords = Arrays.asList(wordsArray);
         
         if (allWords.isEmpty()) {
-            JOptionPane.showMessageDialog(this, 
-                "No words available for spelling practice", 
-                "Error", 
-                JOptionPane.ERROR_MESSAGE);
             return false;
         }
         
@@ -203,7 +200,7 @@ public class SpellingPracticeApp extends JFrame {
             e.printStackTrace();
         }
     }
-    
+
     private void saveProgress() {
         try {
             List<String> lines = new ArrayList<>();
@@ -304,7 +301,7 @@ public class SpellingPracticeApp extends JFrame {
         
         // Progress label
         progressLabel = new JLabel("Word 1 of " + WORDS_PER_SESSION);
-        progressLabel.setFont(new Font("Arial", Font.BOLD, 14));
+        progressLabel.setFont(new Font("Arial", Font.BOLD, 24));
         gbc.gridx = 0;
         gbc.gridy = 0;
         gbc.gridwidth = 2;
@@ -312,25 +309,27 @@ public class SpellingPracticeApp extends JFrame {
         
         // Word display
         wordLabel = new JLabel("", SwingConstants.CENTER);
-        wordLabel.setFont(new Font("Arial", Font.BOLD, 36));
-        wordLabel.setPreferredSize(new Dimension(300, 60));
-        wordLabel.setBorder(BorderFactory.createLineBorder(Color.GRAY, 2));
+        wordLabel.setFont(new Font("Arial", Font.BOLD, 72));
+        wordLabel.setPreferredSize(new Dimension(700, 150));
+        wordLabel.setBorder(BorderFactory.createLineBorder(Color.GRAY, 4));
         gbc.gridy = 1;
         mainPanel.add(wordLabel, gbc);
         
         // Buttons panel
         JPanel buttonPanel = new JPanel(new FlowLayout());
         
-        correctButton = new JButton("✓ Correct");
-        correctButton.setFont(new Font("Arial", Font.PLAIN, 18));
+        correctButton = new JButton("Correct");
+        correctButton.setFont(new Font("Arial", Font.BOLD, 32));
+        correctButton.setPreferredSize(new Dimension(200, 80));
         correctButton.setBackground(Color.GREEN);
         correctButton.setOpaque(true);
         correctButton.setBorderPainted(false);
         correctButton.addActionListener(this::handleCorrect);
         buttonPanel.add(correctButton);
         
-        wrongButton = new JButton("✗ Wrong");
-        wrongButton.setFont(new Font("Arial", Font.PLAIN, 18));
+        wrongButton = new JButton("Wrong");
+        wrongButton.setFont(new Font("Arial", Font.BOLD, 32));
+        wrongButton.setPreferredSize(new Dimension(200, 80));
         wrongButton.setBackground(Color.RED);
         wrongButton.setOpaque(true);
         wrongButton.setBorderPainted(false);
@@ -342,13 +341,13 @@ public class SpellingPracticeApp extends JFrame {
         
         // Session statistics
         sessionStatsLabel = new JLabel("Session: Correct: 0 | Wrong: 0");
-        sessionStatsLabel.setFont(new Font("Arial", Font.PLAIN, 12));
+        sessionStatsLabel.setFont(new Font("Arial", Font.BOLD, 20));
         gbc.gridy = 3;
         mainPanel.add(sessionStatsLabel, gbc);
         
         // Statistics label
         statsLabel = new JLabel("");
-        statsLabel.setFont(new Font("Arial", Font.ITALIC, 12));
+        statsLabel.setFont(new Font("Arial", Font.BOLD | Font.ITALIC, 18));
         gbc.gridy = 4;
         mainPanel.add(statsLabel, gbc);
         
@@ -358,6 +357,8 @@ public class SpellingPracticeApp extends JFrame {
         JPanel bottomPanel = new JPanel(new FlowLayout());
         
         showStatsButton = new JButton("Show All Statistics");
+        showStatsButton.setFont(new Font("Arial", Font.BOLD, 18));
+        showStatsButton.setPreferredSize(new Dimension(250, 50));
         showStatsButton.addActionListener(e -> showStatistics());
         bottomPanel.add(showStatsButton);
         
@@ -392,13 +393,40 @@ public class SpellingPracticeApp extends JFrame {
     }
     
     private void handleWrong(ActionEvent e) {
-        // Record the mistake without asking for details
-        recordMistake(currentWord);
-        currentSessionMistakes.add(currentWord);
-        sessionWrong++;
-        currentWordIndex++;
-        updateSessionStats();
-        loadNextWord();
+        // Show dialog to enter the mistake
+        JDialog dialog = new JDialog(this, "Record Mistake", true);
+        dialog.setLayout(new BorderLayout());
+        dialog.setSize(300, 200);
+        dialog.setLocationRelativeTo(this);
+        
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        
+        JLabel label = new JLabel("How was '" + currentWord + "' spelled?");
+        panel.add(label, BorderLayout.NORTH);
+        
+        JTextArea textArea = new JTextArea(3, 20);
+        textArea.setFont(new Font("Arial", Font.PLAIN, 16));
+        JScrollPane scrollPane = new JScrollPane(textArea);
+        panel.add(scrollPane, BorderLayout.CENTER);
+        
+        JButton saveButton = new JButton("Save & Continue");
+        saveButton.addActionListener(ev -> {
+            String mistake = textArea.getText().trim();
+            if (!mistake.isEmpty()) {
+                recordMistake(currentWord, mistake);
+            }
+            currentSessionMistakes.add(currentWord);
+            sessionWrong++;
+            currentWordIndex++;
+            updateSessionStats();
+            dialog.dispose();
+            loadNextWord();
+        });
+        
+        panel.add(saveButton, BorderLayout.SOUTH);
+        dialog.add(panel);
+        dialog.setVisible(true);
     }
     
     private void updateSessionStats() {
@@ -406,14 +434,17 @@ public class SpellingPracticeApp extends JFrame {
             sessionCorrect, sessionWrong));
     }
     
-    private void recordMistake(String word) {
+    private void recordMistake(String word, String mistake) {
         // Update mistake count
         mistakeCount.put(word, mistakeCount.getOrDefault(word, 0) + 1);
         
-        // Save to file (optional - just for tracking)
+        // Record mistake details
+        mistakeDetails.computeIfAbsent(word, k -> new ArrayList<>()).add(mistake);
+        
+        // Save to file
         try {
-            String entry = String.format("%s | Word: %s | Mistake Count: %d%n", 
-                new Date(), word, mistakeCount.get(word));
+            String entry = String.format("%s | Correct: %s | Mistake: %s | Time: %s%n", 
+                new Date(), word, mistake, System.currentTimeMillis());
             Files.write(Paths.get(MISTAKES_FILE), 
                 entry.getBytes(), 
                 StandardOpenOption.CREATE, 
@@ -433,7 +464,7 @@ public class SpellingPracticeApp extends JFrame {
         // Show summary dialog
         JDialog dialog = new JDialog(this, "Session Complete!", true);
         dialog.setLayout(new BorderLayout());
-        dialog.setSize(400, 300);
+        dialog.setSize(500, 400);
         dialog.setLocationRelativeTo(this);
         
         JPanel panel = new JPanel(new BorderLayout());
@@ -442,7 +473,7 @@ public class SpellingPracticeApp extends JFrame {
         // Summary text
         JTextArea summaryArea = new JTextArea();
         summaryArea.setEditable(false);
-        summaryArea.setFont(new Font("Arial", Font.PLAIN, 14));
+        summaryArea.setFont(new Font("Arial", Font.BOLD, 16));
         
         StringBuilder summary = new StringBuilder();
         summary.append("Session Complete!\n\n");
@@ -469,6 +500,8 @@ public class SpellingPracticeApp extends JFrame {
         JPanel buttonPanel = new JPanel(new FlowLayout());
         
         JButton newSessionButton = new JButton("New Session");
+        newSessionButton.setFont(new Font("Arial", Font.BOLD, 16));
+        newSessionButton.setPreferredSize(new Dimension(150, 40));
         newSessionButton.addActionListener(ev -> {
             dialog.dispose();
             startNewSession();
@@ -476,6 +509,8 @@ public class SpellingPracticeApp extends JFrame {
         buttonPanel.add(newSessionButton);
         
         JButton exitButton = new JButton("Exit");
+        exitButton.setFont(new Font("Arial", Font.BOLD, 16));
+        exitButton.setPreferredSize(new Dimension(150, 40));
         exitButton.addActionListener(ev -> System.exit(0));
         buttonPanel.add(exitButton);
         
@@ -489,14 +524,14 @@ public class SpellingPracticeApp extends JFrame {
         dialog.setVisible(true);
     }
     
-   private void showStatistics() {
+    private void showStatistics() {
         JDialog dialog = new JDialog(this, "Spelling Statistics", true);
         dialog.setLayout(new BorderLayout());
-        dialog.setSize(400, 400);
+        dialog.setSize(500, 400);
         dialog.setLocationRelativeTo(this);
         
         // Create table model
-        String[] columnNames = {"Word", "Times Wrong"};
+        String[] columnNames = {"Word", "Times Wrong", "Recent Mistakes"};
         DefaultTableModel model = new DefaultTableModel(columnNames, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -504,7 +539,7 @@ public class SpellingPracticeApp extends JFrame {
             }
         };
         
-        // Populate table with data - sort by mistake count (highest first)
+        // Populate table with data
         List<Map.Entry<String, Integer>> sortedEntries = mistakeCount.entrySet().stream()
             .sorted((e1, e2) -> {
                 int cmp = e2.getValue().compareTo(e1.getValue());
@@ -518,13 +553,17 @@ public class SpellingPracticeApp extends JFrame {
         for (Map.Entry<String, Integer> entry : sortedEntries) {
             String word = entry.getKey();
             Integer count = entry.getValue();
-            model.addRow(new Object[]{word, count});
+            List<String> mistakes = mistakeDetails.get(word);
+            String recentMistakes = mistakes != null && !mistakes.isEmpty() 
+                ? mistakes.get(mistakes.size() - 1) 
+                : "";
+            model.addRow(new Object[]{word, count, recentMistakes});
         }
         
         // Add words with no mistakes
         for (String word : allWords) {
             if (!mistakeCount.containsKey(word)) {
-                model.addRow(new Object[]{word, 0});
+                model.addRow(new Object[]{word, 0, ""});
             }
         }
         
@@ -542,7 +581,7 @@ public class SpellingPracticeApp extends JFrame {
         dialog.add(buttonPanel, BorderLayout.SOUTH);
         
         dialog.setVisible(true);
-    } 
+    }
     
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> new SpellingPracticeApp());
