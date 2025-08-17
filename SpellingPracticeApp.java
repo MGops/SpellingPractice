@@ -9,7 +9,6 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 public class SpellingPracticeApp extends JFrame {
-    private static final String MISTAKES_FILE = "spelling_mistakes.txt";
     private static final String PROGRESS_FILE = "spelling_progress.txt";
     private static final String SESSION_HISTORY_FILE = "session_history.txt";
     private static final int WORDS_PER_SESSION = 30;
@@ -18,7 +17,6 @@ public class SpellingPracticeApp extends JFrame {
     private List<String> allWords = new ArrayList<>();
     private List<String> sessionWords = new ArrayList<>();
     private Map<String, Integer> mistakeCount = new HashMap<>();
-    private Map<String, List<String>> mistakeDetails = new HashMap<>();
     private List<List<String>> recentSessions = new ArrayList<>();
     private List<String> currentSessionMistakes = new ArrayList<>();
     private String currentWord;
@@ -393,40 +391,13 @@ public class SpellingPracticeApp extends JFrame {
     }
     
     private void handleWrong(ActionEvent e) {
-        // Show dialog to enter the mistake
-        JDialog dialog = new JDialog(this, "Record Mistake", true);
-        dialog.setLayout(new BorderLayout());
-        dialog.setSize(300, 200);
-        dialog.setLocationRelativeTo(this);
-        
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        
-        JLabel label = new JLabel("How was '" + currentWord + "' spelled?");
-        panel.add(label, BorderLayout.NORTH);
-        
-        JTextArea textArea = new JTextArea(3, 20);
-        textArea.setFont(new Font("Arial", Font.PLAIN, 16));
-        JScrollPane scrollPane = new JScrollPane(textArea);
-        panel.add(scrollPane, BorderLayout.CENTER);
-        
-        JButton saveButton = new JButton("Save & Continue");
-        saveButton.addActionListener(ev -> {
-            String mistake = textArea.getText().trim();
-            if (!mistake.isEmpty()) {
-                recordMistake(currentWord, mistake);
-            }
-            currentSessionMistakes.add(currentWord);
-            sessionWrong++;
-            currentWordIndex++;
-            updateSessionStats();
-            dialog.dispose();
-            loadNextWord();
-        });
-        
-        panel.add(saveButton, BorderLayout.SOUTH);
-        dialog.add(panel);
-        dialog.setVisible(true);
+        // Simply record the mistake without asking for details
+        recordMistake(currentWord);
+        currentSessionMistakes.add(currentWord);
+        sessionWrong++;
+        currentWordIndex++;
+        updateSessionStats();
+        loadNextWord();
     }
     
     private void updateSessionStats() {
@@ -434,24 +405,9 @@ public class SpellingPracticeApp extends JFrame {
             sessionCorrect, sessionWrong));
     }
     
-    private void recordMistake(String word, String mistake) {
+    private void recordMistake(String word) {
         // Update mistake count
         mistakeCount.put(word, mistakeCount.getOrDefault(word, 0) + 1);
-        
-        // Record mistake details
-        mistakeDetails.computeIfAbsent(word, k -> new ArrayList<>()).add(mistake);
-        
-        // Save to file
-        try {
-            String entry = String.format("%s | Correct: %s | Mistake: %s | Time: %s%n", 
-                new Date(), word, mistake, System.currentTimeMillis());
-            Files.write(Paths.get(MISTAKES_FILE), 
-                entry.getBytes(), 
-                StandardOpenOption.CREATE, 
-                StandardOpenOption.APPEND);
-        } catch (IOException ex) {
-            ex.printStackTrace();
-        }
         
         // Save progress
         saveProgress();
@@ -531,7 +487,7 @@ public class SpellingPracticeApp extends JFrame {
         dialog.setLocationRelativeTo(this);
         
         // Create table model
-        String[] columnNames = {"Word", "Times Wrong", "Recent Mistakes"};
+        String[] columnNames = {"Word", "Times Wrong"};
         DefaultTableModel model = new DefaultTableModel(columnNames, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -553,17 +509,13 @@ public class SpellingPracticeApp extends JFrame {
         for (Map.Entry<String, Integer> entry : sortedEntries) {
             String word = entry.getKey();
             Integer count = entry.getValue();
-            List<String> mistakes = mistakeDetails.get(word);
-            String recentMistakes = mistakes != null && !mistakes.isEmpty() 
-                ? mistakes.get(mistakes.size() - 1) 
-                : "";
-            model.addRow(new Object[]{word, count, recentMistakes});
+            model.addRow(new Object[]{word, count});
         }
         
         // Add words with no mistakes
         for (String word : allWords) {
             if (!mistakeCount.containsKey(word)) {
-                model.addRow(new Object[]{word, 0, ""});
+                model.addRow(new Object[]{word, 0});
             }
         }
         
